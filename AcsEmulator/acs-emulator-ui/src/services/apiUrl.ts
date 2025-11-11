@@ -1,1 +1,1 @@
-export const ApiUrl = "https://localhost";
+export const ApiUrl = typeof window !== 'undefined' ? window.location.origin : "https://localhost";
