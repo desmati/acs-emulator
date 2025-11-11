@@ -138,6 +138,10 @@ using (var scope = app.Services.CreateScope())
 app.UseHttpsRedirection();
 app.UseCors();
 
+// Serve static files from wwwroot (UI)
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -151,6 +155,9 @@ app.MapGroup("").MapEmailsApi();
 app.Services.GetService<Trouter>()!.AddEndpoints(app);
 app.Services.GetService<CallAutomationWebSockets>()!.AddEndpoints(app);
 app.Services.GetService<CallAutomationController>()!.AddEndpoints(app);
+
+// Fallback to index.html for SPA routes
+app.MapFallbackToFile("index.html");
 
 app.Run();
 
