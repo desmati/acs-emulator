@@ -1,0 +1,49 @@
+# Git
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+LICENSE
+*.png
+
+# VS Code and IDEs
+.vscode
+.vs
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build results
+**/bin/
+**/obj/
+**/out/
+**/build/
+**/dist/
+
+# Node
+**/node_modules/
+**/npm-debug.log
+**/.npm
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Test results
+**/TestResults/
+**/.vs/
+**/*.trx
+
+# Package files
+**/*.nupkg
+**/*.snupkg
+
+# Misc
+**/.DS_Store
+**/Thumbs.db
+**/.lutignore
+**/*.lutconfig

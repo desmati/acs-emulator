@@ -1,9 +1,37 @@
 # Emulator for Azure Communication Services
 Local emulator to run Azure Communication Services client SDKs without having to provision an Azure Communication Services resource.
 
-## Download the emulator CLI tool
+## Running the emulator
 
-### Install from GitHub
+### Option 1: Docker (Recommended)
+
+The easiest way to run the emulator is using Docker:
+
+```bash
+# Pull the image from GitHub Container Registry
+docker pull ghcr.io/desmati/acs-emulator:latest
+
+# Run the emulator
+docker run -d -p 80:80 -p 443:443 --name acs-emulator ghcr.io/desmati/acs-emulator:latest
+
+# Access the emulator
+# Swagger UI: http://localhost/swagger
+# Connection string: "endpoint=https://localhost/;accessKey=pw=="
+```
+
+**Building locally:**
+
+```bash
+# Build the Docker image
+docker build -t acs-emulator .
+
+# Run the container
+docker run -d -p 80:80 -p 443:443 --name acs-emulator acs-emulator:latest
+```
+
+### Option 2: Download the emulator CLI tool
+
+#### Install from GitHub
 
 Make sure you have the .NET Core SDK installed, download the latest [AcsEmulatorCLI Release](https://github.com/DominikMe/acs-emulator/releases) and then run from a terminal:
 
@@ -11,7 +39,7 @@ Make sure you have the .NET Core SDK installed, download the latest [AcsEmulator
 dotnet tool install -g --add-source [downloadFolder] AcsEmulatorCLI --version [nupkgVersion]
 ```
 
-### Running the tool
+#### Running the tool
 
 **Usage:**
 
@@ -49,6 +77,169 @@ dotnet tool install -g --add-source [downloadFolder] AcsEmulatorCLI --version [n
 ![Emulator UI](./AcsEmulator/EmulatorUI.png)
 
 * For inspecting the DB data directly, we recommend to install [DB Browser for SQLite](https://sqlitebrowser.org/) and use it to open the `AcsEmulator.db` file
+
+## Using Testcontainers for integration testing
+
+[Testcontainers](https://dotnet.testcontainers.org/) allows you to run the ACS emulator as part of your automated tests.
+
+### Install Testcontainers
+
+Add the Testcontainers NuGet package to your test project:
+
+```bash
+dotnet add package Testcontainers --version 3.10.0
+```
+
+### Example: Using the emulator in xUnit tests
+
+```csharp
+using Azure.Communication;
+using Azure.Communication.Chat;
+using Azure.Communication.Identity;
+using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Containers;
+using Xunit;
+
+public class AcsChatTests : IAsyncLifetime
+{
+    private IContainer _acsEmulatorContainer;
+    private string _endpoint;
+    private const string ConnectionString = "endpoint=https://localhost/;accessKey=pw==";
+
+    public async Task InitializeAsync()
+    {
+        // Create and start the ACS emulator container
+        _acsEmulatorContainer = new ContainerBuilder()
+            .WithImage("ghcr.io/desmati/acs-emulator:latest")
+            .WithPortBinding(80, 80)
+            .WithPortBinding(443, 443)
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r => r
+                .ForPort(80)
+                .ForPath("/swagger")))
+            .Build();
+
+        await _acsEmulatorContainer.StartAsync();
+
+        _endpoint = $"http://{_acsEmulatorContainer.Hostname}:{_acsEmulatorContainer.GetMappedPublicPort(80)}/";
+    }
+
+    [Fact]
+    public async Task CanCreateUserAndChatThread()
+    {
+        // Arrange
+        var identityClient = new CommunicationIdentityClient(ConnectionString);
+
+        // Create users
+        var user1 = await identityClient.CreateUserAsync();
+        var user2 = await identityClient.CreateUserAsync();
+
+        // Get tokens
+        var tokenResponse1 = await identityClient.GetTokenAsync(user1.Value, scopes: new[] { CommunicationTokenScope.Chat });
+
+        // Create chat client
+        var chatClient = new ChatClient(new Uri(_endpoint), new CommunicationTokenCredential(tokenResponse1.Value.Token));
+
+        // Act - Create chat thread
+        var chatThreadResult = await chatClient.CreateChatThreadAsync(
+            topic: "Test Thread",
+            participants: new[]
+            {
+                new ChatParticipant(user2.Value) { DisplayName = "User 2" }
+            });
+
+        // Assert
+        Assert.NotNull(chatThreadResult.Value.ChatThread);
+        Assert.NotEmpty(chatThreadResult.Value.ChatThread.Id);
+    }
+
+    public async Task DisposeAsync()
+    {
+        if (_acsEmulatorContainer != null)
+        {
+            await _acsEmulatorContainer.DisposeAsync();
+        }
+    }
+}
+```
+
+### Example: Using with NUnit
+
+```csharp
+using Azure.Communication.Identity;
+using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Containers;
+using NUnit.Framework;
+
+[TestFixture]
+public class AcsEmulatorTests
+{
+    private IContainer _container;
+    private string _endpoint;
+
+    [OneTimeSetUp]
+    public async Task Setup()
+    {
+        _container = new ContainerBuilder()
+            .WithImage("ghcr.io/desmati/acs-emulator:latest")
+            .WithPortBinding(80, true)
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r => r
+                .ForPort(80)
+                .ForPath("/swagger")))
+            .Build();
+
+        await _container.StartAsync();
+        _endpoint = $"http://localhost:{_container.GetMappedPublicPort(80)}/";
+    }
+
+    [Test]
+    public async Task CanCreateUser()
+    {
+        // Arrange
+        var connectionString = "endpoint=https://localhost/;accessKey=pw==";
+        var client = new CommunicationIdentityClient(connectionString);
+
+        // Act
+        var user = await client.CreateUserAsync();
+
+        // Assert
+        Assert.That(user.Value.Id, Is.Not.Null);
+    }
+
+    [OneTimeTearDown]
+    public async Task TearDown()
+    {
+        await _container.DisposeAsync();
+    }
+}
+```
+
+### Example: Docker Compose for local development
+
+Create a `docker-compose.yml` file:
+
+```yaml
+version: '3.8'
+
+services:
+  acs-emulator:
+    image: ghcr.io/desmati/acs-emulator:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+    volumes:
+      - acs-data:/app/data
+
+volumes:
+  acs-data:
+```
+
+Run with:
+
+```bash
+docker-compose up -d
+```
 
 ## Getting started with code
 
